@@ -1,8 +1,8 @@
-streamlit==1.27.2
-opencv-python==4.8.0.76
-opencv-python-headless==4.8.0.76  # Needed for headless environments
-mediapipe==0.10.0
-requests==2.31.0
-numpy==1.24.3  # Often required for OpenCV
-Pillow==9.5.0  # Image processing
-base64io==1.1.0  # Handling base64 operations
+streamlit
+opencv-python
+opencv-python-headless  # Needed for headless environments
+mediapipe
+requests
+numpy  # Often required for OpenCV
+Pillow  # Image processing
+base64io  # Handling base64 operations
