@@ -5,3 +5,4 @@ requests
 numpy  # Often required for OpenCV
 Pillow  # Image processing
 base64io  # Handling base64 operations
+streamlit_webrtc
