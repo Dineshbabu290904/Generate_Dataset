@@ -7,9 +7,11 @@ import requests
 import logging
 
 # Set up logging to log to a file and to the console
-logging.basicConfig(filename='dataset_generator.log', level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-
+logging.basicConfig(
+    filename="dataset_generator.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 class VideoTransformer(VideoTransformerBase):
     def __init__(self):
@@ -32,30 +34,30 @@ def upload_to_github(file_path, repo, branch, token, repo_path):
     Uploads a single file to GitHub.
     """
     try:
-        url = f'https://api.github.com/repos/{repo}/contents/{repo_path}'
+        url = f"https://api.github.com/repos/{repo}/contents/{repo_path}"
         headers = {
-            'Authorization': f'token {token}',
-            'Accept': 'application/vnd.github.v3+json'
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json",
         }
 
-        with open(file_path, 'rb') as file:
+        with open(file_path, "rb") as file:
             content = file.read()
-        encoded_content = base64.b64encode(content).decode('utf-8')
+        encoded_content = base64.b64encode(content).decode("utf-8")
 
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
-            file_sha = response.json().get('sha')
+            file_sha = response.json().get("sha")
             data = {
-                'message': f'Update {repo_path}',
-                'content': encoded_content,
-                'branch': branch,
-                'sha': file_sha
+                "message": f"Update {repo_path}",
+                "content": encoded_content,
+                "branch": branch,
+                "sha": file_sha,
             }
         else:
             data = {
-                'message': f'Add {repo_path}',
-                'content': encoded_content,
-                'branch': branch
+                "message": f"Add {repo_path}",
+                "content": encoded_content,
+                "branch": branch,
             }
 
         response = requests.put(url, headers=headers, json=data)
@@ -73,22 +75,24 @@ def upload_to_github(file_path, repo, branch, token, repo_path):
 
 def main():
     st.title("Face Dataset Generator")
-    st.markdown("""
+    st.markdown(
+        """
         **Steps:**
         1. Enter Roll Number and Name.
         2. Use the webcam feed to capture images.
         3. Upload captured images to GitHub.
-    """)
+    """
+    )
 
     # Input fields for metadata
-    roll_number = st.text_input("Enter Roll Number", key="roll_number")
-    name = st.text_input("Enter Student Name", key="student_name")
-    repo = st.secrets.get("Repo")
-    branch = st.secrets.get("Branch")
+    roll_number = st.text_input("Enter Roll Number")
+    name = st.text_input("Enter Student Name")
+    repo = st.secrets.get("Repo", "your-default-repo-name")
+    branch = st.secrets.get("Branch", "main")
     token = st.secrets.get("TOKEN")
 
     # Directory to store temporary images
-    temp_path = "/tmp/captured_images"
+    temp_path = "captured_images"
     os.makedirs(temp_path, exist_ok=True)
 
     # Initialize video transformer
@@ -114,7 +118,10 @@ def main():
                 image_name = f"{roll_number}_{len(os.listdir(temp_path)) + 1}.jpg"
                 image_path = os.path.join(temp_path, image_name)
                 cv2.imwrite(image_path, webrtc_ctx.video_transformer.captured_frame)
-                st.image(webrtc_ctx.video_transformer.captured_frame, caption="Captured Image")
+                st.image(
+                    webrtc_ctx.video_transformer.captured_frame,
+                    caption=f"Captured Image: {image_name}",
+                )
                 st.success(f"Image saved: {image_path}")
             else:
                 st.error("No image captured. Try again!")
