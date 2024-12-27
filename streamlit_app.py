@@ -1,17 +1,12 @@
 import streamlit as st
-import cv2
-import os
 import requests
-import mediapipe as mp
-import time
 import base64
+import os
 import logging
 
 # Set up logging to log to a file and to the console
 logging.basicConfig(filename='dataset_generator.log', level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
-
-mp_face_mesh = mp.solutions.face_mesh
 
 
 def upload_bulk_to_github(files_data, repo, branch, token):
@@ -61,50 +56,6 @@ def upload_bulk_to_github(files_data, repo, branch, token):
         logging.error(f"Error uploading files in bulk: {e}")
 
 
-def capture_images(roll_number, num_images, direction, temp_path, repo, branch, token):
-    """
-    Captures images from the webcam, stores them locally in a temporary folder,
-    uploads them to GitHub in bulk, and deletes them after uploading.
-    """
-    try:
-        cap = cv2.VideoCapture(0)
-        frame_placeholder = st.empty()
-        count = 0
-        image_paths = []
-
-        while cap.isOpened() and count < num_images:
-            ret, frame = cap.read()
-            if not ret:
-                logging.warning("Video Capture Ended")
-                break
-
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame_placeholder.image(rgb_frame, channels="RGB")
-            with mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1) as face_mesh:
-                results = face_mesh.process(rgb_frame)
-
-                if results.multi_face_landmarks:
-                    image_name = f'{roll_number}_{direction}_{count}.jpg'
-                    local_image_path = os.path.join(temp_path, image_name)
-                    cv2.imwrite(local_image_path, frame)
-                    image_paths.append(local_image_path)
-                    count += 1
-                    time.sleep(0.5)
-
-        cap.release()
-        cv2.destroyAllWindows()
-
-        files_data = [(path, f'{roll_number}/{direction}/{os.path.basename(path)}') for path in image_paths]
-        upload_bulk_to_github(files_data, repo, branch, token)
-
-        for path in image_paths:
-            os.remove(path)
-        logging.info("All captured images deleted after upload.")
-
-    except Exception as e:
-        logging.error(f"Error during image capture: {e}")
-
-
 def main():
     st.title("Face Dataset Generator")
 
@@ -114,7 +65,48 @@ def main():
     branch = st.secrets["Branch"]
     token = st.secrets["TOKEN"]
 
-    if st.button("Start Capture"):
+    st.markdown(
+        """
+        <h3>Camera Feed</h3>
+        <p>Click "Capture Image" to capture and upload images from your device's camera.</p>
+        <video id="video" width="640" height="480" autoplay></video>
+        <button id="capture">Capture Image</button>
+        <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+        <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const captureButton = document.getElementById('capture');
+        const constraints = { video: true };
+
+        navigator.mediaDevices.getUserMedia(constraints)
+            .then((stream) => {
+                video.srcObject = stream;
+            })
+            .catch((err) => {
+                console.error('Error accessing the camera: ', err);
+            });
+
+        captureButton.addEventListener('click', () => {
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const dataURL = canvas.toDataURL('image/jpeg');
+            fetch('/upload_image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: dataURL })
+            }).then(response => response.json())
+              .then(data => console.log(data))
+              .catch(err => console.error(err));
+        });
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
+
+    if "captured_images" not in st.session_state:
+        st.session_state["captured_images"] = []
+
+    if st.button("Start Upload"):
         if not roll_number or not name or not repo or not branch or not token:
             st.error("Please enter all required fields.")
             return
@@ -123,12 +115,21 @@ def main():
             temp_path = '/tmp/temp_images'
             os.makedirs(temp_path, exist_ok=True)
 
-            capture_images(roll_number, 50, 'front', temp_path, repo, branch, token)
-            capture_images(roll_number, 25, 'left', temp_path, repo, branch, token)
-            capture_images(roll_number, 25, 'right', temp_path, repo, branch, token)
+            # Assume captured images are stored in session state
+            for idx, image_data in enumerate(st.session_state["captured_images"]):
+                image_path = os.path.join(temp_path, f'{roll_number}_image_{idx}.jpg')
+                with open(image_path, "wb") as img_file:
+                    img_file.write(base64.b64decode(image_data.split(",")[1]))
 
-            st.success(f"Dataset for {roll_number}_{name} captured and uploaded successfully!")
+            files_data = [(os.path.join(temp_path, f), f'{roll_number}/image_{idx}.jpg')
+                          for idx, f in enumerate(os.listdir(temp_path))]
+            upload_bulk_to_github(files_data, repo, branch, token)
+
+            for file in os.listdir(temp_path):
+                os.remove(os.path.join(temp_path, file))
             os.rmdir(temp_path)
+
+            st.success(f"Dataset for {roll_number}_{name} uploaded successfully!")
 
         except Exception as e:
             st.error(f"Error: {e}")
