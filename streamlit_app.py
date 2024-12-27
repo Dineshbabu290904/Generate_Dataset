@@ -1,7 +1,6 @@
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import cv2
-import numpy as np
 import os
 import base64
 import requests
@@ -14,20 +13,18 @@ logging.basicConfig(filename='dataset_generator.log', level=logging.INFO,
 
 class VideoTransformer(VideoTransformerBase):
     def __init__(self):
-        self.image_captured = False
         self.captured_frame = None
+        self.capture_flag = False
 
     def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
-
-        if self.image_captured:
+        if self.capture_flag:
             self.captured_frame = img
-            self.image_captured = False
-
+            self.capture_flag = False
         return img
 
     def capture_image(self):
-        self.image_captured = True
+        self.capture_flag = True
 
 
 def upload_to_github(file_path, repo, branch, token, repo_path):
@@ -47,7 +44,7 @@ def upload_to_github(file_path, repo, branch, token, repo_path):
 
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
-            file_sha = response.json()['sha']
+            file_sha = response.json().get('sha')
             data = {
                 'message': f'Update {repo_path}',
                 'content': encoded_content,
@@ -64,66 +61,96 @@ def upload_to_github(file_path, repo, branch, token, repo_path):
         response = requests.put(url, headers=headers, json=data)
         if response.status_code in [200, 201]:
             logging.info(f"Successfully uploaded {repo_path}")
+            return True
         else:
             logging.error(f"Failed to upload {repo_path}: {response.json()}")
+            return False
 
     except Exception as e:
         logging.error(f"Error uploading file: {e}")
+        return False
 
 
 def main():
     st.title("Face Dataset Generator")
+    st.markdown("""
+        **Steps:**
+        1. Enter Roll Number and Name.
+        2. Use the webcam feed to capture images.
+        3. Upload captured images to GitHub.
+    """)
 
-    roll_number = st.text_input("Enter Roll Number")
-    name = st.text_input("Enter Student Name")
-    repo = st.secrets["Repo"]
-    branch = st.secrets["Branch"]
-    token = st.secrets["TOKEN"]
+    # Input fields for metadata
+    roll_number = st.text_input("Enter Roll Number", key="roll_number")
+    name = st.text_input("Enter Student Name", key="student_name")
+    repo = st.secrets.get("Repo")
+    branch = st.secrets.get("Branch")
+    token = st.secrets.get("TOKEN")
 
+    # Directory to store temporary images
     temp_path = "/tmp/captured_images"
     os.makedirs(temp_path, exist_ok=True)
 
+    # Initialize video transformer
     if "video_transformer" not in st.session_state:
         st.session_state["video_transformer"] = VideoTransformer()
 
+    # WebRTC streamer
     webrtc_ctx = webrtc_streamer(
         key="example",
         video_transformer_factory=lambda: st.session_state["video_transformer"],
         media_stream_constraints={"video": True, "audio": False},
     )
 
+    # Capture image functionality
     if st.button("Capture Image"):
+        if not roll_number or not name:
+            st.error("Please provide Roll Number and Name.")
+            return
+
         if webrtc_ctx.video_transformer:
             webrtc_ctx.video_transformer.capture_image()
             if webrtc_ctx.video_transformer.captured_frame is not None:
-                image_path = os.path.join(temp_path, f"{roll_number}_{len(os.listdir(temp_path))}.jpg")
+                image_name = f"{roll_number}_{len(os.listdir(temp_path)) + 1}.jpg"
+                image_path = os.path.join(temp_path, image_name)
                 cv2.imwrite(image_path, webrtc_ctx.video_transformer.captured_frame)
                 st.image(webrtc_ctx.video_transformer.captured_frame, caption="Captured Image")
-                st.success(f"Image saved to {image_path}")
+                st.success(f"Image saved: {image_path}")
             else:
-                st.error("No image captured yet. Try again!")
+                st.error("No image captured. Try again!")
 
+    # Upload images to GitHub
     if st.button("Upload Images"):
-        if not roll_number or not name or not repo or not branch or not token:
-            st.error("Please enter all required fields.")
+        if not roll_number or not repo or not branch or not token:
+            st.error("Please fill in all required fields.")
             return
 
-        try:
-            for file_name in os.listdir(temp_path):
-                file_path = os.path.join(temp_path, file_name)
-                repo_path = f"{roll_number}/{file_name}"
-                upload_to_github(file_path, repo, branch, token, repo_path)
+        uploaded_files = 0
+        for file_name in os.listdir(temp_path):
+            file_path = os.path.join(temp_path, file_name)
+            repo_path = f"{roll_number}/{file_name}"
+            if upload_to_github(file_path, repo, branch, token, repo_path):
                 os.remove(file_path)
-            st.success("All images uploaded successfully!")
-        except Exception as e:
-            st.error(f"Error during upload: {e}")
+                uploaded_files += 1
 
+        if uploaded_files > 0:
+            st.success(f"Uploaded {uploaded_files} images to GitHub successfully!")
+        else:
+            st.error("No images uploaded. Check logs for details.")
+
+    # Clear temporary directory
     if st.button("Clear Captured Images"):
         for file_name in os.listdir(temp_path):
             os.remove(os.path.join(temp_path, file_name))
         st.success("Cleared all captured images.")
 
-    os.rmdir(temp_path)
+    # Cleanup temporary directory after the session
+    if st.button("Cleanup Temporary Directory"):
+        try:
+            os.rmdir(temp_path)
+            st.success("Temporary directory cleaned up!")
+        except Exception as e:
+            st.warning(f"Error cleaning up temporary directory: {e}")
 
 
 if __name__ == "__main__":
